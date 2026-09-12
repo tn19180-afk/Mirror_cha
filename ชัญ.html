@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mirror - 5 Players Party Game</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;600;800&display=swap" rel="stylesheet">
+    <!-- Tone.js for Sound Effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+    <style>
+        body {
+            font-family: 'Kanit', sans-serif;
+            background-color: #1a1a2e;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+        
+        .game-title {
+            text-shadow: 0 4px 10px rgba(255, 0, 128, 0.6);
+            background: linear-gradient(to right, #ff0080, #ff8c00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .cmd-text {
+            text-shadow: 0 5px 15px rgba(0,0,0,0.5), 0 0 20px rgba(255, 255, 255, 0.8);
+        }
+
+        /* Avatar Box Glows */
+        .avatar-box { transition: all 0.3s ease; }
+        .avatar-box.master { 
+            box-shadow: 0 0 20px 5px gold;
+            border-color: gold;
+            transform: scale(1.05);
+        }
+        .avatar-box.completed {
+            box-shadow: 0 0 20px 5px lime;
+            border-color: lime;
+        }
+
+        /* Floating Animation */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+        .animate-float { animation: float 3s ease-in-out infinite; }
+
+        /* Pop in Animation */
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            80% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop { animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+        canvas {
+            transform: scaleX(-1); /* Mirror effect */
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+        }
+        
+        #ui-layer { z-index: 20; position: absolute; pointer-events: none; width: 100%; height: 100%; }
+        .pointer-events-auto { pointer-events: auto; }
+    </style>
+</head>
+<body class="text-white">
+
+    <!-- Video Element (Hidden, used for MediaPipe) -->
+    <video id="video" autoplay playsinline muted style="display: none;"></video>
+    
+    <!-- Canvas for Silhouettes -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Layer -->
+    <div id="ui-layer" class="flex flex-col justify-between items-center p-4">
+        
+        <!-- Top Bar -->
+        <div class="w-full flex justify-between items-start px-6">
+            <div id="round-display" class="text-3xl font-bold bg-white/20 backdrop-blur-md px-6 py-2 rounded-full hidden">
+                รอบที่ <span id="round-number" class="text-yellow-400">1</span>
+            </div>
+            <div id="timer-display" class="text-5xl font-extrabold text-red-500 bg-white/90 backdrop-blur-md px-6 py-2 rounded-2xl hidden shadow-xl border-4 border-red-500">
+                10.0
+            </div>
+        </div>
+
+        <!-- Center Display (Commands & Countdown) -->
+        <div id="center-display" class="flex-1 flex flex-col items-center justify-center text-center">
+            
+            <!-- Main Menu / Start Screen -->
+            <div id="start-screen" class="pointer-events-auto bg-black/60 backdrop-blur-lg p-10 rounded-3xl border-4 border-pink-500 flex flex-col items-center shadow-[0_0_50px_rgba(255,0,128,0.5)]">
+                <h1 class="text-7xl font-extrabold game-title mb-4 uppercase">MIRROR</h1>
+                <p class="text-xl text-gray-200 mb-8 font-semibold">เกมจังก้าขยับร่าง ฮาป่วนกล้อง (5 ผู้เล่น)</p>
+                <button id="start-btn" class="bg-gradient-to-r from-pink-500 to-orange-500 text-white font-bold text-3xl px-12 py-4 rounded-full hover:scale-110 transition-transform shadow-lg pointer-events-auto">
+                    เริ่มเกมเลย!
+                </button>
+                <p id="loading-text" class="text-yellow-400 mt-4 hidden animate-pulse font-bold text-lg">กำลังโหลดระบบ AI กรุณารอสักครู่...</p>
+            </div>
+
+            <!-- Big Command Text -->
+            <div id="command-text" class="text-7xl md:text-9xl font-extrabold text-white cmd-text hidden animate-pop">
+                กางแขน!
+            </div>
+            
+            <!-- Big Info Text (Countdown, etc) -->
+            <div id="info-text" class="text-6xl md:text-8xl font-black text-yellow-300 cmd-text hidden mt-6">
+                3
+            </div>
+
+        </div>
+
+        <!-- Bottom Bar (Players) -->
+        <div id="players-dock" class="w-full max-w-6xl grid grid-cols-5 gap-2 md:gap-4 mb-4 hidden">
+            <!-- Player cards generated dynamically -->
+        </div>
+
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="absolute inset-0 z-50 bg-black/80 flex flex-col items-center justify-center hidden pointer-events-auto backdrop-blur-sm">
+        <h2 class="text-6xl font-bold text-yellow-400 mb-8 animate-bounce">สรุปคะแนน!</h2>
+        <div id="ranking-list" class="w-full max-w-2xl bg-white/10 rounded-3xl p-6 flex flex-col gap-4 mb-8">
+            <!-- Rankings go here -->
+        </div>
+        <button id="restart-btn" class="bg-green-500 text-white font-bold text-2xl px-10 py-4 rounded-full hover:scale-105 transition">เล่นอีกครั้ง</button>
+    </div>
+
+    <script type="module">
+        import {
+            PoseLandmarker,
+            FilesetResolver
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm";
+
+        // Game Constants & Variables
+        const MAX_PLAYERS = 5;
+        const MAX_ROUNDS = 8;
+        let BASE_TIME_LIMIT = 8.0; // Starts at 8s, gets faster
+        
+        // Colors & Avatars for 5 players
+        const PLAYER_PROFILES = [
+            { color: '#FF3B3B', avatar: '🦊', name: 'สีแดง' }, // Red
+            { color: '#3B82FF', avatar: '🐱', name: 'สีฟ้า' }, // Blue
+            { color: '#3BFF55', avatar: '🐸', name: 'สีเขียว' }, // Green
+            { color: '#FFC83B', avatar: '🐶', name: 'สีเหลือง' }, // Yellow
+            { color: '#D53BFF', avatar: '🐻', name: 'สีม่วง' }  // Purple
+        ];
+
+        // Commands Definitions
+        const COMMANDS = [
+            { id: 'RIGHT_UP', text: 'ยกมือขวา! 🙋‍♂️', desc: 'ยกมือขวาขึ้นให้สุดแขน' },
+            { id: 'LEFT_UP', text: 'ยกมือซ้าย! 🙋‍♀️', desc: 'ยกมือซ้ายขึ้นให้สุดแขน' },
+            { id: 'BOTH_UP', text: 'ชูสองมือ! 🙌', desc: 'ยกแขนทั้งสองข้างขึ้น' },
+            { id: 'T_POSE', text: 'กางแขน! ✈️', desc: 'กางแขนสองข้างเป็นรูปตัว T' },
+            { id: 'HEAD', text: 'จับหัว! 🙆', desc: 'เอามือทั้งสองข้างแตะหู/หัว' },
+            { id: 'HIPS', text: 'แตะเอว! 🧍', desc: 'เอามือทั้งสองข้างจับที่เอว' },
+            { id: 'LEAN_L', text: 'เอียงตัวไปทางซ้าย! ⬅️', desc: 'เอนตัวไปทางซ้ายของคุณ' },
+            { id: 'LEAN_R', text: 'เอียงตัวไปทางขวา! ➡️', desc: 'เอนตัวไปทางขวาของคุณ' }
+        ];
+
+        // State variables
+        let gameState = 'INIT'; // INIT, LOBBY, COUNTDOWN, PLAYING, ROUND_OVER, END
+        let currentRound = 1;
+        let timeRemaining = 0;
+        let currentCmd = null;
+        let currentMasterIdx = -1;
+        
+        let players = []; // Stores { score, completedThisRound, rank }
+        let currentLandmarks = []; // Latest ML results
+        
+        // ML & Canvas
+        let poseLandmarker;
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('gameCanvas');
+        let ctx = canvas.getContext('2d');
+        let lastVideoTime = -1;
+        let animationId;
+        
+        // Tone.js Synths
+        let synth;
+
+        // UI Elements
+        const uiStartScreen = document.getElementById('start-screen');
+        const btnStart = document.getElementById('start-btn');
+        const txtLoading = document.getElementById('loading-text');
+        const uiRound = document.getElementById('round-display');
+        const txtRoundNum = document.getElementById('round-number');
+        const uiTimer = document.getElementById('timer-display');
+        const uiCenterCmd = document.getElementById('command-text');
+        const uiCenterInfo = document.getElementById('info-text');
+        const uiPlayersDock = document.getElementById('players-dock');
+        const uiGameOver = document.getElementById('game-over-screen');
+        const uiRanking = document.getElementById('ranking-list');
+        const btnRestart = document.getElementById('restart-btn');
+
+        btnRestart.addEventListener('click', () => {
+            location.reload();
+        });
+
+        function initAudio() {
+            synth = new Tone.PolySynth(Tone.Synth).toDestination();
+            Tone.start();
+        }
+
+        function playSound(type) {
+            if(!synth) return;
+            if(type === 'blip') synth.triggerAttackRelease("C5", "16n");
+            if(type === 'ding') synth.triggerAttackRelease("E5", "8n");
+            if(type === 'tada') {
+                synth.triggerAttackRelease(["C4", "E4", "G4", "C5"], "2n");
+            }
+            if(type === 'wrong') synth.triggerAttackRelease("G3", "8n");
+        }
+
+        btnStart.addEventListener('click', async () => {
+            initAudio();
+            btnStart.classList.add('hidden');
+            txtLoading.classList.remove('hidden');
+            txtLoading.innerText = 'กำลังโหลดระบบ AI และกล้อง...';
+            
+            try {
+                await setupMediaPipe();
+                await setupCamera();
+                startGame();
+            } catch (err) {
+                console.error(err);
+                alert("เกิดข้อผิดพลาด: " + err.message + "\n\nโปรดตรวจสอบว่าอนุญาตให้ใช้กล้องแล้ว และบราวเซอร์ของคุณรองรับการทำงาน");
+                btnStart.classList.remove('hidden');
+                txtLoading.classList.add('hidden');
+            }
+        });
+
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { width: 1280, height: 720, facingMode: "user" } 
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    resolve();
+                };
+            });
+        }
+
+        async function setupMediaPipe() {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+            );
+            
+            poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+                    delegate: "CPU" // เปลี่ยนจาก GPU เป็น CPU เพื่อความเสถียร รองรับได้ทุกอุปกรณ์
+                },
+                runningMode: "VIDEO",
+                numPoses: MAX_PLAYERS // Track up to 5 people
+            });
+        }
+
+        function startGame() {
+            uiStartScreen.classList.add('hidden');
+            uiRound.classList.remove('hidden');
+            uiPlayersDock.classList.remove('hidden');
+            
+            // Initialize Player Data
+            for(let i=0; i<MAX_PLAYERS; i++) {
+                players.push({ score: 0, completedThisRound: false, rank: 0 });
+            }
+            buildPlayerUI();
+            
+            // Start ML Loop
+            renderLoop();
+            
+            // Start Game Flow
+            startNextRound();
+        }
+
+        function buildPlayerUI() {
+            uiPlayersDock.innerHTML = '';
+            for(let i=0; i<MAX_PLAYERS; i++) {
+                const p = PLAYER_PROFILES[i];
+                uiPlayersDock.innerHTML += `
+                    <div id="player-box-${i}" class="avatar-box flex flex-col items-center bg-black/60 backdrop-blur-md rounded-2xl p-2 border-4 border-gray-600">
+                        <div class="text-4xl mb-1">${p.avatar}</div>
+                        <div class="text-sm font-bold truncate w-full text-center" style="color: ${p.color}">${p.name}</div>
+                        <div id="score-${i}" class="text-2xl font-black text-white">0</div>
+                        <div id="status-${i}" class="text-xs text-gray-400 mt-1 h-4"></div>
+                    </div>
+                `;
+            }
+        }
+
+        async function startNextRound() {
+            if(currentRound > MAX_ROUNDS) {
+                endGame();
+                return;
+            }
+
+            gameState = 'COUNTDOWN';
+            txtRoundNum.innerText = currentRound;
+            
+            // Reset player states for round
+            players.forEach((p, i) => {
+                p.completedThisRound = false;
+                document.getElementById(`player-box-${i}`).classList.remove('completed', 'master');
+                document.getElementById(`player-box-${i}`).style.borderColor = 'gray';
+                document.getElementById(`status-${i}`).innerText = '';
+            });
+
+            // Random Command & Master
+            currentCmd = COMMANDS[Math.floor(Math.random() * COMMANDS.length)];
+            currentMasterIdx = Math.floor(Math.random() * MAX_PLAYERS); // Random 0-4
+
+            // Highlight Master in UI
+            const masterBox = document.getElementById(`player-box-${currentMasterIdx}`);
+            masterBox.classList.add('master');
+            document.getElementById(`status-${currentMasterIdx}`).innerHTML = '<span class="text-yellow-400 font-bold">⭐ ต้นแบบ!</span>';
+
+            // Hide Timer, Show Countdown
+            uiTimer.classList.add('hidden');
+            uiCenterCmd.classList.add('hidden');
+            uiCenterInfo.classList.remove('hidden');
+            uiCenterInfo.classList.remove('text-green-400', 'text-red-500');
+            uiCenterInfo.classList.add('text-yellow-300');
+
+            // Countdown 3, 2, 1
+            for(let i=3; i>0; i--) {
+                uiCenterInfo.innerText = i;
+                uiCenterInfo.classList.remove('animate-pop');
+                void uiCenterInfo.offsetWidth; // trigger reflow
+                uiCenterInfo.classList.add('animate-pop');
+                playSound('blip');
+                await sleep(1000);
+            }
+
+            // GO!
+            playSound('go'); // High beep
+            synth.triggerAttackRelease("C6", "4n");
+            
+            uiCenterInfo.innerText = "GO!";
+            uiCenterInfo.classList.add('text-green-400');
+            
+            uiCenterCmd.innerText = currentCmd.text;
+            uiCenterCmd.classList.remove('hidden');
+            
+            await sleep(500);
+            uiCenterInfo.classList.add('hidden');
+            
+            // Start Playing State
+            gameState = 'PLAYING';
+            uiTimer.classList.remove('hidden');
+            
+            // Decrease time limit per round to increase difficulty
+            timeRemaining = Math.max(3.0, BASE_TIME_LIMIT - (currentRound * 0.5)); 
+            
+            playRound();
+        }
+
+        function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+        function playRound() {
+            let lastTime = performance.now();
+            let rankScore = 100; // First gets 100, next 80...
+
+            function tick(now) {
+                if(gameState !== 'PLAYING') return;
+
+                let dt = (now - lastTime) / 1000;
+                lastTime = now;
+                timeRemaining -= dt;
+
+                // Update Timer UI
+                uiTimer.innerText = Math.max(0, timeRemaining).toFixed(1);
+
+                // Check poses
+                currentLandmarks.forEach((landmarks, idx) => {
+                    if(!players[idx].completedThisRound) {
+                        if(checkPose(currentCmd.id, landmarks)) {
+                            // Player completed!
+                            players[idx].completedThisRound = true;
+                            playSound('ding');
+                            
+                            // Visuals
+                            const box = document.getElementById(`player-box-${idx}`);
+                            box.classList.add('completed');
+                            box.style.borderColor = 'lime';
+                            
+                            // Calculate Score
+                            let pointsGained = rankScore;
+                            if(idx === currentMasterIdx) {
+                                pointsGained += 50; // Master Bonus
+                                document.getElementById(`status-${idx}`).innerHTML = `<span class="text-lime-400">+${pointsGained} (โบนัส!)</span>`;
+                            } else {
+                                document.getElementById(`status-${idx}`).innerHTML = `<span class="text-lime-400">+${pointsGained}</span>`;
+                            }
+                            
+                            players[idx].score += pointsGained;
+                            document.getElementById(`score-${idx}`).innerText = players[idx].score;
+                            
+                            rankScore = Math.max(20, rankScore - 20); // Reduce points for next person
+                        }
+                    }
+                });
+
+                // Check if everyone is done or time's up
+                let allDone = players.every((p, idx) => p.completedThisRound || currentLandmarks.length <= idx);
+                
+                if(timeRemaining <= 0 || allDone) {
+                    endRound();
+                } else {
+                    requestAnimationFrame(tick);
+                }
+            }
+            requestAnimationFrame(tick);
+        }
+
+        async function endRound() {
+            gameState = 'ROUND_OVER';
+            uiTimer.classList.add('hidden');
+            uiCenterCmd.classList.add('hidden');
+            
+            uiCenterInfo.classList.remove('hidden', 'text-yellow-300', 'text-green-400');
+            uiCenterInfo.classList.add('text-red-500');
+            uiCenterInfo.innerText = "หมดเวลา!";
+            playSound('wrong');
+
+            await sleep(2500);
+            
+            currentRound++;
+            startNextRound();
+        }
+
+        // Note: Coordinates from MediaPipe are 0.0 to 1.0
+        // Because camera is mirrored when drawing, the physical left hand is on the right side of the image.
+        // However, MediaPipe's R_WRIST (16) corresponds to the user's physical Right Hand.
+        function checkPose(cmdId, lm) {
+            // Safe check
+            if(!lm || lm.length < 33) return false;
+
+            // Helper for distance
+            const dist = (p1, p2) => Math.hypot(lm[p1].x - lm[p2].x, lm[p1].y - lm[p2].y);
+            
+            const NOSE = 0, L_EAR = 7, R_EAR = 8, L_SHL = 11, R_SHL = 12;
+            const L_WRT = 15, R_WRT = 16, L_HIP = 23, R_HIP = 24;
+
+            // User's Left/Right mapping based on Mediapipe
+            // Left Wrist (15) = User's physical left arm
+            // Right Wrist (16) = User's physical right arm
+
+            switch(cmdId) {
+                case 'RIGHT_UP':
+                    // Right wrist above right shoulder. Left wrist below left shoulder.
+                    return lm[R_WRT].y < lm[R_SHL].y - 0.1 && lm[L_WRT].y > lm[L_SHL].y;
+                case 'LEFT_UP':
+                    return lm[L_WRT].y < lm[L_SHL].y - 0.1 && lm[R_WRT].y > lm[R_SHL].y;
+                case 'BOTH_UP':
+                    return lm[L_WRT].y < lm[L_SHL].y - 0.1 && lm[R_WRT].y < lm[R_SHL].y - 0.1;
+                case 'T_POSE':
+                    // Arms extended horizontally
+                    let r_horizontal = Math.abs(lm[R_WRT].y - lm[R_SHL].y) < 0.2;
+                    let l_horizontal = Math.abs(lm[L_WRT].y - lm[L_SHL].y) < 0.2;
+                    let r_extended = dist(R_WRT, R_SHL) > 0.15;
+                    let l_extended = dist(L_WRT, L_SHL) > 0.15;
+                    return r_horizontal && l_horizontal && r_extended && l_extended;
+                case 'HEAD':
+                    // Hands close to ears
+                    return dist(L_WRT, L_EAR) < 0.2 && dist(R_WRT, R_EAR) < 0.2;
+                case 'HIPS':
+                    // Hands close to hips
+                    return dist(L_WRT, L_HIP) < 0.2 && dist(R_WRT, R_HIP) < 0.2;
+                case 'LEAN_L':
+                    // User physically leans left. 
+                    // MediaPipe X: 0 is left, 1 is right. 
+                    // User's left side is closer to X=1.
+                    let hip_cx_L = (lm[L_HIP].x + lm[R_HIP].x) / 2;
+                    return lm[NOSE].x > hip_cx_L + 0.05;
+                case 'LEAN_R':
+                    // User physically leans right (towards X=0)
+                    let hip_cx_R = (lm[L_HIP].x + lm[R_HIP].x) / 2;
+                    return lm[NOSE].x < hip_cx_R - 0.05;
+                default:
+                    return false;
+            }
+        }
+
+        function renderLoop() {
+            if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                // Process frame
+                try {
+                    let results = poseLandmarker.detectForVideo(video, performance.now());
+                    processAndDraw(results);
+                } catch (error) {
+                    console.error("AI Tracking Error:", error);
+                }
+            }
+            requestAnimationFrame(renderLoop);
+        }
+
+        function processAndDraw(results) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // เพิ่ม: วาดภาพกล้องจริงเป็นพื้นหลังแบบเบลอ เพื่อให้ยืนยันได้ว่ากล้องติดแล้ว
+            ctx.save();
+            ctx.filter = 'blur(12px) brightness(0.35)';
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+            
+            if(results.landmarks && results.landmarks.length > 0) {
+                // Sort by Nose X (descending) so that it matches Screen Left to Screen Right
+                // Because we mirror the canvas visually, a higher X in mediapipe = physically on user's left = right side of screen.
+                // Wait, if canvas is mirrored (scaleX(-1)), then Drawing at X=100 actually appears at width-100.
+                // MediaPipe X=0 is left of camera image.
+                // Let's sort them so index 0 is left-most on screen.
+                
+                let sortedPoses = results.landmarks.sort((a, b) => a[0].x - b[0].x);
+                currentLandmarks = sortedPoses.slice(0, MAX_PLAYERS); // Take up to 5
+
+                // Draw each player's silhouette
+                currentLandmarks.forEach((lm, idx) => {
+                    drawSilhouette(lm, idx);
+                });
+            } else {
+                currentLandmarks = [];
+            }
+        }
+
+        const POSE_CONNECTIONS = [
+            [11,12], [11,13], [13,15], [12,14], [14,16], // Upper body
+            [11,23], [12,24], [23,24],                   // Torso
+            [23,25], [25,27], [24,26], [26,28]           // Legs
+        ];
+
+        function drawSilhouette(lm, idx) {
+            const p = PLAYER_PROFILES[idx];
+            const cw = canvas.width;
+            const ch = canvas.height;
+
+            ctx.save();
+            // Glow effect if completed
+            if(players[idx] && players[idx].completedThisRound) {
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = "lime";
+            } else if (idx === currentMasterIdx && gameState === 'PLAYING') {
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = "gold";
+            }
+
+            // Draw Lines
+            ctx.lineWidth = 15;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = p.color;
+
+            ctx.beginPath();
+            POSE_CONNECTIONS.forEach(([i, j]) => {
+                if(lm[i].visibility > 0.5 && lm[j].visibility > 0.5) {
+                    ctx.moveTo(lm[i].x * cw, lm[i].y * ch);
+                    ctx.lineTo(lm[j].x * cw, lm[j].y * ch);
+                }
+            });
+            ctx.stroke();
+
+            // Draw Avatar at Nose
+            if(lm[0].visibility > 0.5) {
+                ctx.shadowBlur = 0; // reset shadow for text
+                
+                // Calculate size based on shoulder distance for depth perception
+                let shlDist = Math.abs(lm[11].x - lm[12].x) * cw;
+                let fontSize = Math.max(60, shlDist * 1.2); 
+                
+                ctx.font = `${fontSize}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // If this is the master, draw a crown!
+                if(idx === currentMasterIdx && gameState !== 'ROUND_OVER') {
+                    ctx.fillText('👑', lm[0].x * cw, (lm[0].y * ch) - fontSize);
+                }
+                
+                ctx.fillText(p.avatar, lm[0].x * cw, lm[0].y * ch);
+            }
+            
+            ctx.restore();
+        }
+
+        function endGame() {
+            gameState = 'END';
+            playSound('tada');
+            
+            // Hide Gameplay UI
+            uiTimer.classList.add('hidden');
+            uiRound.classList.add('hidden');
+            uiCenterCmd.classList.add('hidden');
+            uiCenterInfo.classList.add('hidden');
+            uiPlayersDock.classList.add('hidden');
+            
+            // Sort players by score descending
+            let ranked = players.map((p, i) => ({...p, id: i})).sort((a, b) => b.score - a.score);
+            
+            uiRanking.innerHTML = '';
+            ranked.forEach((r, idx) => {
+                const profile = PLAYER_PROFILES[r.id];
+                // Only show players who actually scored or participated
+                let medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : ''));
+                uiRanking.innerHTML += `
+                    <div class="flex items-center justify-between bg-black/50 p-4 rounded-xl border-l-8" style="border-color: ${profile.color}">
+                        <div class="text-3xl">${medal} ${profile.avatar} <span class="text-xl ml-2 text-white font-bold">${profile.name}</span></div>
+                        <div class="text-4xl font-black text-yellow-400">${r.score} <span class="text-sm text-gray-300">คะแนน</span></div>
+                    </div>
+                `;
+            });
+            
+            uiGameOver.classList.remove('hidden');
+        }
+
+    </script>
+</body>
+</html>
